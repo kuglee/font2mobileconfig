@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+
+display_help() {
+  printf "%s %s\n" \
+    "usage: $(basename $0) -i infile [-d description] [-fn fontname]" \
+    "-o outfile.mobileconfig"
+
+  printf "%s %s\n" \
+    "       $(basename $0) --input infile [--description description]" \
+    "[--fontname fontname] --output outfile.mobileconfig"
+}
+
+overwrite_confirmation() {
+  printf "%s" \
+    "The file \""$1"\" already exists. Do you want to overwrite it?" \
+    "(y/n [n]) "
+
+  read answer
+  case $answer in
+    y)
+      return
+      ;;
+    *)
+      echo "The file was not overwritten."
+
+      # handle exits from shell or function but don't exit interactive shell
+      [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
+      ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  key="$1"
+
+  case $key in
+    -i|--input)
+      input_name="$2"
+      if [ -z "$input_name" ]; then
+        echo "$(basename $0): no input filename specified." >&2
+        echo ""
+        display_help
+        exit 1
+      fi
+      shift
+      ;;
+    -o|--output)
+      output_name="$2"
+      if [ -z "$output_name" ]; then
+        echo "$(basename $0): no output filename specified." >&2
+        echo ""
+        display_help
+        exit 1
+      fi
+      shift
+      ;;
+    -fn|--fontname)
+      font_name="$2"
+      if [ -z "$font_name" ]; then
+        echo "$(basename $0): no fontname specified." >&2
+        echo ""
+        display_help
+        exit 1
+      fi
+      shift
+      ;;
+    -d|--desc)
+      description="$2"
+      if [ -z "$description" ]; then
+        echo "$(basename $0): no description specified." >&2
+        echo ""
+        display_help
+        exit 1
+      fi
+      shift
+      ;;
+    -h|--help)
+      display_help
+      exit 1
+      shift
+      ;;
+    *)
+      # unknown option
+      invalid_argument=1
+      echo "$(basename $0): invalid argument: $1" >&2
+      ;;
+  esac
+  shift
+done
+
+
+if [ ! -f "$input_name" ]; then
+  display_help
+  exit 1
+fi
+
+if [ -z "$output_name" ]; then
+  output_name="${input_name%.*}"
+fi
+
+if [ "${output_name##*.}" != "mobileconfig" ]; then
+  output_name="$output_name.mobileconfig"
+fi
+
+if [ -f "$output_name" ]; then
+  overwrite_confirmation "$output_name"
+fi
+
+if [ -z "$font_name" ]; then
+  font_name="${output_name%.*}"
+fi
+
+if [ -z "$description" ]; then
+  description="${font_name%.*}"
+fi
+
+font=$(openssl base64 -in "$input_name")
+payload_identifier="org.font2mobileconfig.$(echo "$font_name" | tr -d ' ')"
+
+cat > "$output_name" << EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>PayloadContent</key>
+        <array>
+            <dict>
+                <key>Font</key>
+                <data>$font</data>
+                <key>Name</key>
+                <string>$font_name</string>
+                <key>PayloadDescription</key>
+                <string>Configures Font settings</string>
+                <key>PayloadDisplayName</key>
+                <string>Fonts</string>
+                <key>PayloadIdentifier</key>
+                <string>$payload_identifier.font</string>
+                <key>PayloadType</key>
+                <string>com.apple.font</string>
+                <key>PayloadUUID</key>
+                <string>$(uuidgen)</string>
+                <key>PayloadVersion</key>
+                <integer>1</integer>
+            </dict>
+        </array>
+        <key>PayloadDescription</key>
+        <string>$description</string>
+        <key>PayloadDisplayName</key>
+        <string>$font_name</string>
+        <key>PayloadIdentifier</key>
+        <string>$payload_identifier.profile</string>
+        <key>PayloadType</key>
+        <string>Configuration</string>
+        <key>PayloadUUID</key>
+        <string>$(uuidgen)</string>
+        <key>PayloadVersion</key>
+        <integer>1</integer>
+    </dict>
+</plist>
+EOL
